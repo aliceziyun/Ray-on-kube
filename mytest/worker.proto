@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package worker;
+
+message CoreworkerRequest {
+	int32 mode = 1;
+    string plasma_store_socket_name = 2;
+    string raylet_socket_name = 3;
+    string gcs_address = 4;
+    string logs_dir = 5;
+    string node_ip_address = 6;
+    int32 node_manager_port = 7;
+    string raylet_ip_address = 8;
+    bool local_mode = 9;
+    string driver_name = 10;
+    string log_stdout_file_path = 11;
+    string log_stderr_file_path = 12;
+    bytes serialized_job_config = 13;
+    int32 metrics_agent_port = 14;
+    int32 runtime_env_hash = 15;
+    int32 startup_token = 16;
+    string session_name = 17;
+    string cluster_id = 18;
+    string entry_point = 19;
+    int32 worker_launch_time_ms = 20;
+    int32 worker_launched_time_ms = 21;
+    bytes job_binary = 22;
+}
+
+message CoreworkerResponse {
+	string message = 1;
+}
+
+service WorkerService {
+	rpc Info (CoreworkerRequest) returns (CoreworkerResponse) {}
+}
