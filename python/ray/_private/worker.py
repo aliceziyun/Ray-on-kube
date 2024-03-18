@@ -2398,7 +2398,6 @@ def connect(
 
     print("[dev] sending grpc")
 
-    # if mode == SCRIPT_MODE:
     with grpc.insecure_channel('localhost:50051') as channel:
         stup = worker_pb2_grpc.WorkerServiceStub(channel)
 
@@ -2428,7 +2427,7 @@ def connect(
         )
         response = stup.Info(request)
         print("[test]" + response.message)
-    # else:
+
     #     worker.core_worker = ray._raylet.CoreWorker(
     #         mode,
     #         node.plasma_store_socket_name,
