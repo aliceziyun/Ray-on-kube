@@ -64,6 +64,8 @@ from ray._private import ray_option_utils
 from ray._private.client_mode_hook import client_mode_hook
 from ray._private.function_manager import FunctionActorManager
 
+from ray._private.kube import kube_helper
+
 from ray._private.inspect_util import is_cython
 from ray._private.ray_logging import (
     global_worker_stdstream_dispatcher,
@@ -1242,6 +1244,7 @@ def init(
     namespace: Optional[str] = None,
     runtime_env: Optional[Union[Dict[str, Any], "RuntimeEnv"]] = None,  # noqa: F821
     storage: Optional[str] = None,
+    ray_kube: bool = False,
     **kwargs,
 ) -> BaseContext:
     """
@@ -1644,6 +1647,7 @@ def init(
             metrics_export_port=_metrics_export_port,
             tracing_startup_hook=_tracing_startup_hook,
             node_name=_node_name,
+            ray_kube=ray_kube,
         )
         # Start the Ray processes. We set shutdown_at_exit=False because we
         # shutdown the node in the ray.shutdown call that happens in the atexit
@@ -2394,69 +2398,72 @@ def connect(
     else:
         logs_dir = node.get_logs_dir_path()
 
-    # [develop] try develop here
+    if node.kube_helper != None:
+        # Start a kube ray core worker with rpc toward pod
+        print("[worker] start a new worker pod")
+        worker.is_kube_worker = True
+        worker.core_worker = node.kube_helper.pod_create(kube_helper.KubeType.CREATE_WORKER,job_id)
+        with grpc.insecure_channel("{}:{}".format(worker.core_worker, "50051")) as channel:
+            stup = worker_pb2_grpc.WorkerServiceStub(channel)
+            request = worker_pb2.CoreworkerRequest(
+                mode=mode,
+                plasma_store_socket_name=node.plasma_store_socket_name,
+                raylet_socket_name=node.raylet_socket_name,
+                gcs_address=node.gcs_address,
+                logs_dir=logs_dir,
+                node_ip_address=node.node_ip_address,
+                node_manager_port=node.node_manager_port,
+                raylet_ip_address=node.raylet_ip_address,
+                local_mode=(mode == LOCAL_MODE),
+                driver_name=driver_name,
+                log_stdout_file_path=log_stdout_file_path,
+                log_stderr_file_path=log_stderr_file_path,
+                serialized_job_config=serialized_job_config,
+                metrics_agent_port=node.metrics_agent_port,
+                runtime_env_hash=runtime_env_hash,
+                startup_token=startup_token,
+                session_name=session_name,
+                cluster_id=node.cluster_id,
+                entry_point="" if mode != SCRIPT_MODE else entrypoint,
+                worker_launch_time_ms=int(worker_launch_time_ms),
+                worker_launched_time_ms=int(worker_launched_time_ms),
+                job_binary = job_id.binary()
+            )
+            response = stup.Info(request)
+            print("[test]" + response.message)
+    else:
+        # start a normal coreworker
+        worker.is_kube_worker = False
+        worker.core_worker = ray._raylet.CoreWorker(
+            mode,
+            node.plasma_store_socket_name,
+            node.raylet_socket_name,
+            job_id,
+            gcs_options,
+            logs_dir,
+            node.node_ip_address,
+            node.node_manager_port,
+            node.raylet_ip_address,
+            (mode == LOCAL_MODE),
+            driver_name,
+            log_stdout_file_path,
+            log_stderr_file_path,
+            serialized_job_config,
+            node.metrics_agent_port,
+            runtime_env_hash,
+            startup_token,
+            session_name,
+            node.cluster_id,
+            "" if mode != SCRIPT_MODE else entrypoint,
+            worker_launch_time_ms,
+            worker_launched_time_ms,
+        )
+
+        # Notify raylet that the core worker is ready.
+        worker.core_worker.notify_raylet()
+
 
     print("[dev] sending grpc")
-
-    with grpc.insecure_channel('localhost:50051') as channel:
-        stup = worker_pb2_grpc.WorkerServiceStub(channel)
-
-        request = worker_pb2.CoreworkerRequest(
-            mode=mode,
-            plasma_store_socket_name=node.plasma_store_socket_name,
-            raylet_socket_name=node.raylet_socket_name,
-            gcs_address=node.gcs_address,
-            logs_dir=logs_dir,
-            node_ip_address=node.node_ip_address,
-            node_manager_port=node.node_manager_port,
-            raylet_ip_address=node.raylet_ip_address,
-            local_mode=(mode == LOCAL_MODE),
-            driver_name=driver_name,
-            log_stdout_file_path=log_stdout_file_path,
-            log_stderr_file_path=log_stderr_file_path,
-            serialized_job_config=serialized_job_config,
-            metrics_agent_port=node.metrics_agent_port,
-            runtime_env_hash=runtime_env_hash,
-            startup_token=startup_token,
-            session_name=session_name,
-            cluster_id=node.cluster_id,
-            entry_point="" if mode != SCRIPT_MODE else entrypoint,
-            worker_launch_time_ms=int(worker_launch_time_ms),
-            worker_launched_time_ms=int(worker_launched_time_ms),
-            job_binary = job_id.binary()
-        )
-        response = stup.Info(request)
-        print("[test]" + response.message)
-
-    #     worker.core_worker = ray._raylet.CoreWorker(
-    #         mode,
-    #         node.plasma_store_socket_name,
-    #         node.raylet_socket_name,
-    #         job_id,
-    #         gcs_options,
-    #         logs_dir,
-    #         node.node_ip_address,
-    #         node.node_manager_port,
-    #         node.raylet_ip_address,
-    #         (mode == LOCAL_MODE),
-    #         driver_name,
-    #         log_stdout_file_path,
-    #         log_stderr_file_path,
-    #         serialized_job_config,
-    #         node.metrics_agent_port,
-    #         runtime_env_hash,
-    #         startup_token,
-    #         session_name,
-    #         node.cluster_id,
-    #         "" if mode != SCRIPT_MODE else entrypoint,
-    #         worker_launch_time_ms,
-    #         worker_launched_time_ms,
-    #     )
-
-    #     # Notify raylet that the core worker is ready.
-    #     worker.core_worker.notify_raylet()
-
-    # end of develop part
 
     if mode == SCRIPT_MODE:
         worker_id = worker.worker_id

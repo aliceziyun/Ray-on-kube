@@ -130,6 +130,7 @@ class RayParams:
         session_name: The name of the session of the ray cluster.
         webui: The url of the UI.
         cluster_id: The cluster ID.
+        ray_kube: Should be started with the kube ray mode
     """
 
     def __init__(
@@ -192,6 +193,7 @@ class RayParams:
         session_name: Optional[str] = None,
         webui: Optional[str] = None,
         cluster_id: Optional[str] = None,
+        ray_kube: bool = False,
     ):
         self.redis_address = redis_address
         self.gcs_address = gcs_address
@@ -254,6 +256,7 @@ class RayParams:
         self.labels = labels
         self._check_usage()
         self.cluster_id = cluster_id
+        self.ray_kube = ray_kube
 
         # Set the internal config options for object reconstruction.
         if enable_object_reconstruction:

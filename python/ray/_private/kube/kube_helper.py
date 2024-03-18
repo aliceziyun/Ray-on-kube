@@ -27,7 +27,8 @@ class Kubehelper():
         if type == KubeType.CREATE_WORKER:
             """Create a coreworker and return its ip address."""
             worker_pod = pod.create_pod(self, message)
-            self.pod_list.append(worker_pod)
-            return pod.get_pod_ip_address(worker_pod)
+            worker_pod_ip = pod.get_pod_ip_address(worker_pod)
+            self.pod_list[worker_pod] = worker_pod_ip
+            return worker_pod_ip
         else:
             print("[dev error] no such kube type!")

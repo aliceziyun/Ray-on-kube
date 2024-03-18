@@ -176,6 +176,13 @@ parser.add_argument(
         "to import before accepting work."
     ),
 )
+parser.add_argument(
+    "--ray-kube",
+    default=False,
+    type=bool,
+    help="Whether to start the worker as kube ray",
+)
+
 
 if __name__ == "__main__":
     # NOTE(sang): For some reason, if we move the code below
@@ -201,6 +208,7 @@ if __name__ == "__main__":
     raylet_ip_address = args.raylet_ip_address
     if raylet_ip_address is None:
         raylet_ip_address = args.node_ip_address
+    print("[test] is ray_kube on default worker?",args.ray_kube)
     ray_params = RayParams(
         node_ip_address=args.node_ip_address,
         raylet_ip_address=raylet_ip_address,
@@ -217,6 +225,7 @@ if __name__ == "__main__":
         session_name=args.session_name,
         webui=args.webui,
         cluster_id=args.cluster_id,
+        ray_kube=args.ray_kube,
     )
     node = ray._private.node.Node(
         ray_params,

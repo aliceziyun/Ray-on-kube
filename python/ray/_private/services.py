@@ -1527,6 +1527,7 @@ def start_raylet(
     node_name: Optional[str] = None,
     webui: Optional[str] = None,
     labels: Optional[dict] = None,
+    ray_kube: Optional[bool] = False,
 ):
     """Start a raylet, which is a combined local scheduler and object manager.
 
@@ -1672,6 +1673,7 @@ def start_raylet(
             f"--temp-dir={temp_dir}",
             f"--webui={webui}",
             f"--cluster-id={cluster_id}",
+            f"--ray-kube={ray_kube}",
         ]
     )
 

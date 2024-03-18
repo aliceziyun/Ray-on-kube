@@ -23,6 +23,7 @@ import ray
 import ray._private.ray_constants as ray_constants
 import ray._private.services
 from ray._private import storage
+from ray._private.kube.kube_helper import Kubehelper
 from ray._raylet import GcsClient, get_session_key_from_storage
 from ray._private.resource_spec import ResourceSpec
 from ray._private.services import serialize_config, get_address
@@ -32,7 +33,6 @@ from ray._private.utils import open_log, try_to_create_directory, try_to_symlink
 # into the program using Ray. Ray configures it by default automatically
 # using logging.basicConfig in its entry/init points.
 logger = logging.getLogger(__name__)
-
 
 class Node:
     """An encapsulation of the Ray processes on a single node.
@@ -87,6 +87,7 @@ class Node:
         )
         self.all_processes: dict = {}
         self.removal_lock = threading.Lock()
+        self.kube_helper = None
 
         self.ray_init_cluster = ray_init_cluster
         if ray_init_cluster:
@@ -308,6 +309,10 @@ class Node:
             self.start_reaper_process()
         if not connect_only:
             self._ray_params.update_pre_selected_port()
+
+        # Start k8s helper
+        if ray_params.ray_kube:
+            self.kube_helper = Kubehelper(node_name=self.session_name)
 
         # Start processes.
         if head:
@@ -1205,6 +1210,7 @@ class Node:
             node_name=self._ray_params.node_name,
             webui=self._webui_url,
             labels=self._get_node_labels(),
+            ray_kube=self._ray_params.ray_kube,
         )
         assert ray_constants.PROCESS_TYPE_RAYLET not in self.all_processes
         self.all_processes[ray_constants.PROCESS_TYPE_RAYLET] = [process_info]
