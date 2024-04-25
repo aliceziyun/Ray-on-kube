@@ -1233,6 +1233,7 @@ def init(
     logging_format: Optional[str] = None,
     log_to_driver: bool = True,
     namespace: Optional[str] = None,
+    kube_mode: bool = False,
     runtime_env: Optional[Union[Dict[str, Any], "RuntimeEnv"]] = None,  # noqa: F821
     storage: Optional[str] = None,
     **kwargs,
@@ -1637,6 +1638,7 @@ def init(
             metrics_export_port=_metrics_export_port,
             tracing_startup_hook=_tracing_startup_hook,
             node_name=_node_name,
+            kube_mode = kube_mode,
         )
         # Start the Ray processes. We set shutdown_at_exit=False because we
         # shutdown the node in the ray.shutdown call that happens in the atexit

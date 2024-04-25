@@ -5,6 +5,7 @@ import errno
 import json
 import logging
 import os
+import multiprocessing
 import random
 import signal
 import socket
@@ -22,6 +23,8 @@ from filelock import FileLock
 import ray
 import ray._private.ray_constants as ray_constants
 import ray._private.services
+import ray._private.kube.kube_client as kube_client
+from ray._private.kube.kube_server import KubeServer
 from ray._private import storage
 from ray._raylet import GcsClient, get_session_key_from_storage
 from ray._private.resource_spec import ResourceSpec
@@ -134,6 +137,17 @@ class Node:
 
         self._dashboard_agent_listen_port = ray_params.dashboard_agent_listen_port
         self._dashboard_grpc_port = ray_params.dashboard_grpc_port
+
+        # set the kube mode
+        self.kube_mode = ray_params.kube_mode
+
+        # start a kube server if init as kube mode
+        # TODO: may change kube server as a thread which can be killed
+        if not connect_only and self.kube_mode:
+            self.kube_server_process = multiprocessing.Process(target=KubeServer().run_server)
+            self.kube_server_process.daemon = True
+            # print("[node]: start kube server")
+            self.kube_server_process.start()
 
         # Configure log rotation parameters.
         self.max_bytes = int(
@@ -1032,7 +1046,7 @@ class Node:
         assert (
             not self.kernel_fate_share
         ), "a reaper should not be used with kernel fate-sharing"
-        process_info = ray._private.services.start_reaper(fate_share=False)
+        process_info = ray._private.services.start_reaper(fate_share=False,kube_mode=self.kube_mode)
         assert ray_constants.PROCESS_TYPE_REAPER not in self.all_processes
         if process_info is not None:
             self.all_processes[ray_constants.PROCESS_TYPE_REAPER] = [
@@ -1056,6 +1070,7 @@ class Node:
             redirect_logging=self.should_redirect_logs(),
             stdout_file=stderr_file,
             stderr_file=stderr_file,
+            kube_mode=self.kube_mode,
         )
         assert ray_constants.PROCESS_TYPE_LOG_MONITOR not in self.all_processes
         self.all_processes[ray_constants.PROCESS_TYPE_LOG_MONITOR] = [
@@ -1097,6 +1112,7 @@ class Node:
             redirect_logging=self.should_redirect_logs(),
             stdout_file=stderr_file,
             stderr_file=stderr_file,
+            kube_mode=self.kube_mode,
         )
         assert ray_constants.PROCESS_TYPE_DASHBOARD not in self.all_processes
         if process_info is not None:
@@ -1130,6 +1146,7 @@ class Node:
             gcs_server_port=gcs_server_port,
             metrics_agent_port=self._ray_params.metrics_agent_port,
             node_ip_address=self._node_ip_address,
+            kube_mode=self.kube_mode,
         )
         assert ray_constants.PROCESS_TYPE_GCS_SERVER not in self.all_processes
         self.all_processes[ray_constants.PROCESS_TYPE_GCS_SERVER] = [
@@ -1157,6 +1174,7 @@ class Node:
                 valgrind profiler.
         """
         stdout_file, stderr_file = self.get_log_file_handles("raylet", unique=True)
+        
         process_info = ray._private.services.start_raylet(
             self.redis_address,
             self.gcs_address,
@@ -1201,6 +1219,7 @@ class Node:
             node_name=self._ray_params.node_name,
             webui=self._webui_url,
             labels=self._get_node_labels(),
+            kube_mode=self.kube_mode,
         )
         assert ray_constants.PROCESS_TYPE_RAYLET not in self.all_processes
         self.all_processes[ray_constants.PROCESS_TYPE_RAYLET] = [process_info]
@@ -1230,6 +1249,7 @@ class Node:
             backup_count=self.backup_count,
             monitor_ip=self._node_ip_address,
             autoscaler_v2=is_autoscaler_v2(fetch_from_server=True),
+            kube_mode=self.kube_mode,
         )
         assert ray_constants.PROCESS_TYPE_MONITOR not in self.all_processes
         self.all_processes[ray_constants.PROCESS_TYPE_MONITOR] = [process_info]
@@ -1248,6 +1268,7 @@ class Node:
             redis_password=self._ray_params.redis_password,
             fate_share=self.kernel_fate_share,
             runtime_env_agent_address=self.runtime_env_agent_address,
+            kube_mode=self.kube_mode
         )
         assert ray_constants.PROCESS_TYPE_RAY_CLIENT_SERVER not in self.all_processes
         self.all_processes[ray_constants.PROCESS_TYPE_RAY_CLIENT_SERVER] = [
@@ -1413,15 +1434,27 @@ class Node:
                 2. The process had been started in valgrind and had a non-zero
                    exit code.
         """
-
-        # Ensure thread safety
-        with self.removal_lock:
-            self._kill_process_impl(
-                process_type,
-                allow_graceful=allow_graceful,
-                check_alive=check_alive,
-                wait=wait,
-            )
+        if not self.kube_mode:
+            # Ensure thread safety
+            with self.removal_lock:
+                self._kill_process_impl(
+                    process_type,
+                    allow_graceful=allow_graceful,
+                    check_alive=check_alive,
+                    wait=wait,
+                )
+        else:
+            # kill pod in kube_mode
+            message = {
+                "command": "kill",
+                "type": process_type,
+                "params":{
+                    "allow_graceful": allow_graceful,
+                    "check_alive": check_alive,
+                    "wait": wait,
+                }
+            }
+            kube_client.send_message_to_kubeserver(message=message)
 
     def _kill_process_impl(
         self, process_type, allow_graceful=False, check_alive=True, wait=False
@@ -1589,6 +1622,15 @@ class Node:
             wait: If true, then this method will not return until the
                 process in question has exited.
         """
+        # if the node is start as kubenetes mode, just remove all 
+        # pods and ignore orders
+        if self.kube_mode:
+            message = {
+                "command": "killall"
+            }
+            response = kube_client.send_message_to_kubeserver(message)
+            print(response)
+
         # Kill the raylet first. This is important for suppressing errors at
         # shutdown because we give the raylet a chance to exit gracefully and
         # clean up its child worker processes. If we were to kill the plasma

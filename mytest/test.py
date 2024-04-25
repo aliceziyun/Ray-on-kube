@@ -1,13 +1,11 @@
 import ray
 import os
-import time
 
-ray.init(_plasma_directory = "/tmp/ray/")
+ray.init(kube_mode=True)
 
 # Define the square task.
 @ray.remote
 def square(x):
-    os.makedirs("/tmp/ray/test", exist_ok=True)
     return x * x
 
 # Launch four parallel square tasks.

@@ -23,7 +23,9 @@ from filelock import FileLock
 
 # Ray modules
 import ray
+import ray._private.workers.pod_process_starter as process_starter
 import ray._private.ray_constants as ray_constants
+import ray._private.kube.kube_client as kube_client
 from ray._raylet import GcsClient, GcsClientOptions
 from ray.core.generated.common_pb2 import Language
 from ray._private.ray_constants import RAY_NODE_IP_FILENAME
@@ -820,6 +822,7 @@ def start_ray_process(
     stdout_file: Optional[str] = None,
     stderr_file: Optional[str] = None,
     pipe_stdin: bool = False,
+    kube_mode: bool = False,
 ):
     """Start one of the Ray processes.
 
@@ -851,6 +854,7 @@ def start_ray_process(
             no redirection should happen, then this should be None.
         pipe_stdin: If true, subprocess.PIPE will be passed to the process as
             stdin.
+        kube_mode: whether to start the process in kubernetes
 
     Returns:
         Information about the process that was started including a handle to
@@ -994,24 +998,45 @@ def start_ray_process(
                 f"got {total_chrs}"
             )
 
-    process = ConsolePopen(
-        command,
-        env=modified_env,
-        cwd=cwd,
-        stdout=stdout_file,
-        stderr=stderr_file,
-        stdin=subprocess.PIPE if pipe_stdin else None,
-        preexec_fn=preexec_fn if sys.platform != "win32" else None,
-        creationflags=CREATE_SUSPENDED if win32_fate_sharing else 0,
-    )
+    if kube_mode:
+        name = process_type.replace("_","-")
+        message = {
+            "command": "create",
+            "params": {
+                "cmdline": command,
+                "stdout": stdout_file.name,
+                "stderr": stderr_file.name,
+            },
+            "name": name,
+            "envs": {
+                'LD_PRELOAD': modified_env['LD_PRELOAD'],
+            },
+            "type": "raylet",
+        }
 
-    if win32_fate_sharing:
-        try:
-            ray._private.utils.set_kill_child_on_death_win32(process)
-            psutil.Process(process.pid).resume()
-        except (psutil.Error, OSError):
-            process.kill()
-            raise
+        kube_client.send_message_to_kubeserver(message)
+
+        process = None
+
+    else:   
+        process = ConsolePopen(
+            command,
+            env=modified_env,
+            cwd=cwd,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            stdin=subprocess.PIPE if pipe_stdin else None,
+            preexec_fn=preexec_fn if sys.platform != "win32" else None,
+            creationflags=CREATE_SUSPENDED if win32_fate_sharing else 0,
+        )
+
+        if win32_fate_sharing:
+            try:
+                ray._private.utils.set_kill_child_on_death_win32(process)
+                psutil.Process(process.pid).resume()
+            except (psutil.Error, OSError):
+                process.kill()
+                raise
 
     def _get_stream_name(stream):
         if stream is not None:
@@ -1033,7 +1058,7 @@ def start_ray_process(
     )
 
 
-def start_reaper(fate_share=None):
+def start_reaper(fate_share=None,kube_mode: bool = False):
     """Start the reaper process.
 
     This is a lightweight process that simply
@@ -1070,6 +1095,7 @@ def start_reaper(fate_share=None):
         ray_constants.PROCESS_TYPE_REAPER,
         pipe_stdin=True,
         fate_share=fate_share,
+        kube_mode=kube_mode,
     )
     return process_info
 
@@ -1084,6 +1110,7 @@ def start_log_monitor(
     redirect_logging: bool = True,
     stdout_file: Optional[IO[AnyStr]] = subprocess.DEVNULL,
     stderr_file: Optional[IO[AnyStr]] = subprocess.DEVNULL,
+    kube_mode: bool = False,
 ):
     """Start a log monitor process.
 
@@ -1138,6 +1165,7 @@ def start_log_monitor(
         stdout_file=stdout_file,
         stderr_file=stderr_file,
         fate_share=fate_share,
+        kube_mode=kube_mode,
     )
     return process_info
 
@@ -1159,6 +1187,7 @@ def start_api_server(
     redirect_logging: bool = True,
     stdout_file: Optional[IO[AnyStr]] = subprocess.DEVNULL,
     stderr_file: Optional[IO[AnyStr]] = subprocess.DEVNULL,
+    kube_mode: bool = False,
 ):
     """Start a API server process.
 
@@ -1298,6 +1327,7 @@ def start_api_server(
             stdout_file=stdout_file,
             stderr_file=stderr_file,
             fate_share=fate_share,
+            kube_mode=kube_mode
         )
 
         # Retrieve the dashboard url
@@ -1431,6 +1461,7 @@ def start_gcs_server(
     gcs_server_port: Optional[int] = None,
     metrics_agent_port: Optional[int] = None,
     node_ip_address: Optional[str] = None,
+    kube_mode: bool = False
 ):
     """Start a gcs server.
 
@@ -1479,6 +1510,7 @@ def start_gcs_server(
         stdout_file=stdout_file,
         stderr_file=stderr_file,
         fate_share=fate_share,
+        kube_mode=kube_mode
     )
     return process_info
 
@@ -1527,6 +1559,7 @@ def start_raylet(
     node_name: Optional[str] = None,
     webui: Optional[str] = None,
     labels: Optional[dict] = None,
+    kube_mode: bool = False,
 ):
     """Start a raylet, which is a combined local scheduler and object manager.
 
@@ -1651,6 +1684,8 @@ def start_raylet(
     # TODO(architkulkarni): Pipe in setup worker args separately instead of
     # inserting them into start_worker_command and later erasing them if
     # needed.
+    if kube_mode:
+        worker_path = "/home/alice/anaconda3/envs/basement/lib/python3.8/site-packages/ray/_private/kube/kube_client.py"
     start_worker_command = (
         [
             sys.executable,
@@ -1658,8 +1693,7 @@ def start_raylet(
         ]
         + _site_flags()  # Inherit "-S" and "-s" flags from current Python interpreter.
         + [
-            "/home/alice/anaconda3/envs/basement/lib/python3.8/site-packages/ray/_private/workers/pod_worker.py",
-            # worker_path,
+            worker_path,
             f"--node-ip-address={node_ip_address}",
             "--node-manager-port=RAY_NODE_MANAGER_PORT_PLACEHOLDER",
             f"--object-store-name={plasma_store_name}",
@@ -1821,6 +1855,7 @@ def start_raylet(
         stderr_file=stderr_file,
         fate_share=fate_share,
         env_updates=env_updates,
+        kube_mode=kube_mode,
     )
 
     return process_info
@@ -2084,6 +2119,7 @@ def start_monitor(
     backup_count: int = 0,
     monitor_ip: Optional[str] = None,
     autoscaler_v2: bool = False,
+    kube_mode: bool = False,
 ):
     """Run a process to monitor the other processes.
 
@@ -2139,6 +2175,7 @@ def start_monitor(
         stdout_file=stdout_file,
         stderr_file=stderr_file,
         fate_share=fate_share,
+        kube_mode=kube_mode
     )
     return process_info
 
@@ -2154,6 +2191,7 @@ def start_ray_client_server(
     runtime_env_agent_address: Optional[str] = None,
     server_type: str = "proxy",
     serialized_runtime_env_context: Optional[str] = None,
+    kube_mode: bool = False,
 ):
     """Run the server process of the Ray client.
 
@@ -2211,5 +2249,6 @@ def start_ray_client_server(
         stdout_file=stdout_file,
         stderr_file=stderr_file,
         fate_share=fate_share,
+        kube_mode=kube_mode,
     )
     return process_info
