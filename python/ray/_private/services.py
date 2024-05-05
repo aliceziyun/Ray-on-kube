@@ -998,6 +998,7 @@ def start_ray_process(
                 f"got {total_chrs}"
             )
 
+    # if False:
     if kube_mode:
         name = process_type.replace("_","-")
         message = {
@@ -1011,10 +1012,12 @@ def start_ray_process(
             "envs": {
                 'LD_PRELOAD': modified_env['LD_PRELOAD'],
             },
-            "type": "raylet",
         }
 
-        kube_client.send_message_to_kubeserver(message)
+        kube_client.send_message_to_kubeproxy(message)
+
+        # [dev] create one pod and stop
+        # time.sleep(1000000)
 
         process = None
 
@@ -1629,11 +1632,11 @@ def start_raylet(
     # Limit the number of workers that can be started in parallel by the
     # raylet. However, make sure it is at least 1.
     num_cpus_static = static_resources.get("CPU", 0)
-    # maximum_startup_concurrency = max(
-    #     1, min(multiprocessing.cpu_count(), num_cpus_static)
-    # )
+    maximum_startup_concurrency = max(
+        1, min(multiprocessing.cpu_count(), num_cpus_static)
+    )
 
-    maximum_startup_concurrency = 1
+    # maximum_startup_concurrency = 1
 
     # Format the resource argument in a form like 'CPU,1.0,GPU,0,Custom,3'.
     resource_argument = ",".join(
@@ -1685,7 +1688,8 @@ def start_raylet(
     # inserting them into start_worker_command and later erasing them if
     # needed.
     if kube_mode:
-        worker_path = "/home/alice/anaconda3/envs/basement/lib/python3.8/site-packages/ray/_private/kube/kube_client.py"
+        default_worker_path = "_private/kube/kube_client.py"
+        worker_path = os.path.join(os.path.dirname(ray.__file__), default_worker_path)
     start_worker_command = (
         [
             sys.executable,

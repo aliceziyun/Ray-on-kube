@@ -24,7 +24,7 @@ import ray
 import ray._private.ray_constants as ray_constants
 import ray._private.services
 import ray._private.kube.kube_client as kube_client
-from ray._private.kube.kube_server import KubeServer
+from ray._private.kube.kube_proxy import KubeProxy
 from ray._private import storage
 from ray._raylet import GcsClient, get_session_key_from_storage
 from ray._private.resource_spec import ResourceSpec
@@ -144,10 +144,10 @@ class Node:
         # start a kube server if init as kube mode
         # TODO: may change kube server as a thread which can be killed
         if not connect_only and self.kube_mode:
-            self.kube_server_process = multiprocessing.Process(target=KubeServer().run_server)
-            self.kube_server_process.daemon = True
+            self.kube_proxy_process = multiprocessing.Process(target=KubeProxy().run_server)
+            self.kube_proxy_process.daemon = True
             # print("[node]: start kube server")
-            self.kube_server_process.start()
+            self.kube_proxy_process.start()
 
         # Configure log rotation parameters.
         self.max_bytes = int(
@@ -1454,7 +1454,7 @@ class Node:
                     "wait": wait,
                 }
             }
-            kube_client.send_message_to_kubeserver(message=message)
+            kube_client.send_message_to_kubeproxy(message=message)
 
     def _kill_process_impl(
         self, process_type, allow_graceful=False, check_alive=True, wait=False
@@ -1628,7 +1628,7 @@ class Node:
             message = {
                 "command": "killall"
             }
-            response = kube_client.send_message_to_kubeserver(message)
+            response = kube_client.send_message_to_kubeproxy(message)
             print(response)
 
         # Kill the raylet first. This is important for suppressing errors at

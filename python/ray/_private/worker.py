@@ -788,7 +788,7 @@ class Worker:
                 object_ref=object_ref,
                 pin_object=pin_object,
                 owner_address=owner_address,
-                _is_experimental_channel=_is_experimental_channel,
+                # _is_experimental_channel=_is_experimental_channel,
             ),
             # The initial local reference is already acquired internally.
             skip_adding_local_ref=True,

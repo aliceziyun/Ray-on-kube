@@ -1,5 +1,4 @@
 import sys
-import subprocess
 import os
 import random
 import ray._private.services as ray_service
@@ -41,6 +40,8 @@ def _get_env_list():
     )
     env_list.append(pod_ip_env)
 
+    print("test",env_list)
+
     return env_list
 
 def get_ip_address(args):
@@ -70,6 +71,7 @@ def create_default_worker_pod(args,ip):
 
     # set environment variables
     env_list = _get_env_list()
+    exit(0)
 
     # create pod
     print("[kube] creating a default worker pod")

@@ -4,27 +4,35 @@ import os
 import socket
 import json
 
-HOST = '172.31.97.49'
-PORT = 22222
+import ray._private.kube.kube_config as kuberay_config
 
-def send_message_to_kubeserver(message):
+def send_message_to_kubeproxy(message):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((HOST, PORT))
+        s.connect((kuberay_config.PROXY_HOST, kuberay_config.PROXY_PORT))
 
-        # pack message
+        # pack message and send to proxy
         s.send(json.dumps(message).encode())
 
         # handle response
-        # response = s.recv(1024)
+        response = b""
+        while True:
+            chunk = s.recv(1024)
+            if not response:
+                break
+            response += chunk
+
         s.close()
 
-if __name__ == "__main__":
-    # print("[kube client] into main")
-    command = ["/usr/local/lib/python3.8/site-packages/ray/_private/workers/default_worker.py"]
-    command.extend(sys.argv[1:])
-    command.extend([f"--startup-token","0",f"--webui","''"])
+        if response.strip() == b"success":
+            return
+        elif len(response) != 0:
+            return response
 
-    # TODO: add ip address of current node
+if __name__ == "__main__":
+    command = [kuberay_config.DEFAULT_WORKER_PATH] \
+            + sys.argv[1:] \
+            # + [f"--startup-token 0", "--webui ''"]
+
     name = "worker-"+str(random.randint(0, 100000)).zfill(6)
 
     def get_envs():
@@ -38,11 +46,11 @@ if __name__ == "__main__":
     message = {
         "command": "create",
         "params": {
-            "cmdline": command
+            "cmdline": command,
         },
         "envs": envs,
         "name": name,
         "type": "worker"
     }
 
-    send_message_to_kubeserver(message)
+    send_message_to_kubeproxy(message)

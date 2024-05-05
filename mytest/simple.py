@@ -1,5 +1,4 @@
 import ray
-import os
 
 ray.init(kube_mode=True)
 
